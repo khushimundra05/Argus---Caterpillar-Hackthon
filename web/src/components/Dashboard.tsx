@@ -16,8 +16,19 @@ const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2
 const fmtDur = (s: number) => (s < 60 ? `${Math.round(s)}s` : s < 3600 ? `${Math.floor(s / 60)}m ${Math.round(s % 60)}s` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`);
 
 export default function Dashboard() {
-  const { state: S, operatorId, switchOperator, health, voiceOn, toggleVoice, post } = useArgus(1000);
+  const { state: S, operatorId, switchOperator, health, voiceOn, toggleVoice, post, refresh } = useArgus(1000);
   useAlertVoice(S);
+
+  // Start a task, then speak + show the briefing (safety for all, how-to depth by proficiency)
+  const startTask = async (taskId: number) => {
+    const r = await fetch("/api/tasks", { method: "POST", body: JSON.stringify({ action: "start", taskId }) });
+    const j = await r.json().catch(() => null);
+    refresh();
+    if (j?.briefing) {
+      voice.speak(j.briefing.spoken, "full");
+      window.dispatchEvent(new CustomEvent("argus:briefing", { detail: { ...j.briefing, label: "Task briefing" } }));
+    }
+  };
 
   if (!S) return <div className="grid min-h-screen place-items-center text-zinc-500">Connecting to Argus…</div>;
 
@@ -88,7 +99,7 @@ export default function Dashboard() {
             </CardTitle>
             <div className="space-y-2">
               {S.tasks.map((t: Task) => (
-                <TaskRow key={t.id} t={t} post={post} anyActive={!!current} />
+                <TaskRow key={t.id} t={t} post={post} onStart={startTask} anyActive={!!current} />
               ))}
             </div>
           </Card>
@@ -198,7 +209,7 @@ export default function Dashboard() {
               {S.events.map((e: { ts: number; kind: string; text: string }, k: number) => (
                 <div key={k} className="flex gap-2 text-xs">
                   <span className="shrink-0 tabular-nums text-zinc-600">{new Date(e.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
-                  <span className={cn("text-zinc-300", e.kind === "incident" && "text-red-300", e.kind === "anomaly" && "text-amber-300", e.kind === "mode" && "text-cat-yellow", e.kind === "eta" && "text-sky-300")}>
+                  <span className={cn("text-zinc-300", e.kind === "incident" && "text-red-300", e.kind === "anomaly" && "text-amber-300", e.kind === "mode" && "text-cat-yellow", e.kind === "eta" && "text-sky-300", e.kind === "reward" && "text-emerald-300")}>
                     {e.text}
                   </span>
                 </div>
@@ -219,7 +230,9 @@ type Task = {
 };
 type TrainingRec = { id: string; title: string; reason: string | null; duration_min: number; priority: number };
 
-function TaskRow({ t, post, anyActive }: { t: Task; post: (u: string, b: unknown) => Promise<void>; anyActive: boolean }) {
+function TaskRow({
+  t, post, onStart, anyActive,
+}: { t: Task; post: (u: string, b: unknown) => Promise<void>; onStart: (id: number) => void; anyActive: boolean }) {
   const pct = Math.round((t.cycles_done / t.target_cycles) * 100);
   const active = t.status === "in_progress";
   const done = t.status === "completed";
@@ -247,7 +260,7 @@ function TaskRow({ t, post, anyActive }: { t: Task; post: (u: string, b: unknown
               </Button>
             </div>
           ) : (
-            <Button size="sm" disabled={anyActive} onClick={() => post("/api/tasks", { action: "start", taskId: t.id })}>
+            <Button size="sm" disabled={anyActive} onClick={() => onStart(t.id)}>
               <Play className="h-3.5 w-3.5" /> Start
             </Button>
           ))}
@@ -411,10 +424,36 @@ function relDay(iso: string) {
   return days <= 0 && d.toDateString() === new Date().toDateString() ? fmtTime(iso) : `${Math.max(days, 1)}d ago`;
 }
 
-/** Speak alerts on rising edge / escalation; repeat critical alerts; announce mode changes. */
+// Proactive coaching after a critical alert clears (Gemini-worded, template fallback). Not in the safety path.
+const lastCoach: Record<string, number> = {};
+async function coachAfter(type: string) {
+  if (!voice.holdsLock() || Date.now() - (lastCoach[type] ?? 0) < 60000) return; // one tab, once a minute per type
+  lastCoach[type] = Date.now();
+  try {
+    const j = await (await fetch("/api/coach", { method: "POST", body: JSON.stringify({ type }) })).json();
+    const c = j?.coaching;
+    if (!c) return;
+    voice.speak(c.text, "full");
+    window.dispatchEvent(
+      new CustomEvent("argus:briefing", {
+        detail: { spoken: c.text, mode: c.mode, training: c.training, label: "Coaching", source: c.source, model: c.model },
+      }),
+    );
+  } catch {
+    /* coaching is optional */
+  }
+}
+
+/** Speak alerts on rising edge / escalation; repeat critical alerts; announce mode changes and rewards.
+ *  Alerts use the same wording for every operator. */
 function useAlertVoice(S: ArgusS | null) {
   const spoken = useRef<Record<string, { sev: string; at: number; step?: number }>>({});
   const lastMode = useRef<string | null>(null);
+  const lastEventTs = useRef<number | null>(null);
+  useEffect(() => {
+    voice.setPrimary(true); // this page carries safety alerts: it's the tab that speaks
+    return () => voice.setPrimary(false);
+  }, []);
   useEffect(() => {
     if (!S) return;
     const mode: Mode = S.score.mode;
@@ -427,13 +466,21 @@ function useAlertVoice(S: ArgusS | null) {
       const repeatCritical = prev && a.severity === "critical" && now - prev.at > 12000;
       // Idle: speak on first nudge and once when escalated to warning
       if (escalated || repeatCritical) {
-        const phrase = alertPhrase(a, mode, S.machineState.idleCostPerHour);
-        if (phrase) voice.speak(phrase, a.severity === "info" ? "normal" : "alert");
+        voice.speak(alertPhrase(a, S.machineState.idleCostPerHour), a.severity === "info" ? "full" : "alert");
         spoken.current[a.type] = { sev: a.severity, at: now };
       }
     }
     for (const k of Object.keys(spoken.current)) if (!active.has(k)) delete spoken.current[k];
     if (lastMode.current && lastMode.current !== mode) voice.speak(`Assistance mode changed to ${mode}.`, "normal");
     lastMode.current = mode;
+    // Positive reinforcement (safe streaks, acting on nudges): speak rewards that arrived since the last poll
+    const events = S.events as { ts: number; kind: string; text: string }[];
+    if (lastEventTs.current != null)
+      for (const e of [...events].reverse()) {
+        if (e.ts <= lastEventTs.current) continue;
+        if (e.kind === "reward") voice.speak(e.text, "full");
+        else if (e.kind === "resolved") coachAfter(e.text.split(" ")[0]); // "SEATBELT cleared"
+      }
+    lastEventTs.current = events[0]?.ts ?? lastEventTs.current ?? 0;
   }, [S]);
 }

@@ -91,5 +91,87 @@
     "quiz": [
       { "q": "Ideal truck swing angle for an excavator?", "options": ["30-45 degrees", "90 degrees", "180 degrees"], "answer": 0 }
     ]
+  },
+  {
+    "id": "TM-TASK-TRENCHING",
+    "title": "How to: Trench Excavation",
+    "trigger_tag": "TASK_TRENCHING",
+    "duration_min": 8,
+    "level": "Task skills",
+    "summary": "Setting up, digging and managing spoil for a safe, straight trench.",
+    "sections": [
+      { "heading": "Set-up", "body": "Confirm utilities are marked. Position the machine square to the trench line with tracks parallel and at least one metre back from the edge." },
+      { "heading": "Digging", "body": "Take shallow, even passes rather than one deep bite. It reduces wall collapse and strain on the boom." },
+      { "heading": "Spoil and grade", "body": "Place spoil at least half a metre back from the edge, away from the crew. Check grade with the spotter every few metres." }
+    ],
+    "quiz": [
+      { "q": "How far back from the trench edge should the tracks stay?", "options": ["Touching the edge", "At least one metre", "Ten metres"], "answer": 1 },
+      { "q": "Why take shallow passes?", "options": ["To reduce wall collapse", "To use more fuel", "It is faster to dig deep"], "answer": 0 }
+    ]
+  },
+  {
+    "id": "TM-TASK-LOADING",
+    "title": "How to: Truck Loading",
+    "trigger_tag": "TASK_TRUCK_LOADING",
+    "duration_min": 8,
+    "level": "Task skills",
+    "summary": "Truck positioning, load distribution and avoiding the cab.",
+    "sections": [
+      { "heading": "Positioning", "body": "Set the truck at a 30 to 45 degree swing angle and wait for it to stop fully and for the driver's signal." },
+      { "heading": "Loading", "body": "Never swing over the cab. Load the front of the bed first, then the back, lowering the bucket close to the bed before dumping." },
+      { "heading": "Target load", "body": "Count passes to hit the target load. Overloading damages haul trucks and slows the whole cycle." }
+    ],
+    "quiz": [
+      { "q": "Which part of the bed do you load first?", "options": ["The back", "The front", "Only the middle"], "answer": 1 },
+      { "q": "May the bucket pass over the truck cab?", "options": ["Never", "Only when empty", "Yes, if quick"], "answer": 0 }
+    ]
+  },
+  {
+    "id": "TM-TASK-BACKFILL",
+    "title": "How to: Backfilling",
+    "trigger_tag": "TASK_BACKFILL",
+    "duration_min": 6,
+    "level": "Task skills",
+    "summary": "Layered backfill that compacts properly and protects buried utilities.",
+    "sections": [
+      { "heading": "Before you start", "body": "Confirm the trench is clear of people and equipment, and keep the machine off the trench edge." },
+      { "heading": "Layers", "body": "Place material in even layers of about 300 millimetres and let the compaction crew finish each layer." },
+      { "heading": "Protect the pipe", "body": "Push material in from the side instead of dropping it from height." }
+    ],
+    "quiz": [
+      { "q": "Typical backfill layer thickness?", "options": ["About 300 mm", "About 2 m", "As deep as possible"], "answer": 0 }
+    ]
+  },
+  {
+    "id": "TM-TASK-GRADING",
+    "title": "How to: Rough Grading",
+    "trigger_tag": "TASK_GRADING",
+    "duration_min": 8,
+    "level": "Task skills",
+    "summary": "Planning passes and holding a steady blade for a smooth grade.",
+    "sections": [
+      { "heading": "Plan", "body": "Walk or review the area first and note high and low spots. Watch for survey stakes and ground crew." },
+      { "heading": "Passes", "body": "Make long, overlapping passes at a steady speed, cutting high spots and filling low spots in the same pass." },
+      { "heading": "Check", "body": "Check the grade against the stakes every few passes. Keep a full, rolling load in front of the blade." }
+    ],
+    "quiz": [
+      { "q": "What gives a smoother grading finish?", "options": ["Varying speed", "A steady speed with overlapping passes", "Short choppy passes"], "answer": 1 }
+    ]
+  },
+  {
+    "id": "TM-TASK-STOCKPILING",
+    "title": "How to: Stockpiling",
+    "trigger_tag": "TASK_STOCKPILING",
+    "duration_min": 6,
+    "level": "Task skills",
+    "summary": "Building stable, well-separated stockpiles.",
+    "sections": [
+      { "heading": "Stability", "body": "Build in layers instead of pushing over the top edge, and never undercut the face." },
+      { "heading": "Access", "body": "Keep a consistent approach ramp and keep ground crew away from the toe of the pile." },
+      { "heading": "Separation", "body": "Keep material types separate as marked, because mixed material is rejected later." }
+    ],
+    "quiz": [
+      { "q": "Should you undercut a stockpile face?", "options": ["Never", "Only on small piles", "Yes, it's faster"], "answer": 0 }
+    ]
   }
 ]

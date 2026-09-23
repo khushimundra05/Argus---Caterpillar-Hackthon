@@ -1,10 +1,15 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Bot, Send, Wrench } from "lucide-react";
+import Link from "next/link";
+import { BookOpen, Bot, ClipboardList, Send, Wrench } from "lucide-react";
 import { Badge, Button, Card, CardTitle } from "./ui";
 import { voice, type Mode } from "./voice";
 
-type Msg = { role: "user" | "assistant"; content: string; tools?: { name: string; input: unknown; output: unknown }[]; offline?: boolean; mode?: string };
+type Msg = {
+  role: "user" | "assistant"; content: string; tools?: { name: string; input: unknown; output: unknown }[];
+  offline?: boolean; mode?: string; model?: string; note?: string;
+  kind?: "briefing"; label?: string; training?: { id: string; title: string } | null;
+};
 
 const SUGGESTIONS = [
   "What's my schedule today?",
@@ -28,6 +33,20 @@ export function AssistantPanel({ mode, operatorId }: { mode: Mode; operatorId: s
   useEffect(() => {
     end.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [msgs, busy]);
+  // Task briefings (spoken by the dashboard) also appear here as an Argus message
+  useEffect(() => {
+    const onBriefing = (e: Event) => {
+      const b = (e as CustomEvent).detail as {
+        spoken: string; mode: string; training: { id: string; title: string } | null; label?: string; source?: string; model?: string;
+      };
+      setMsgs((m) => [
+        ...m,
+        { role: "assistant", content: b.spoken, kind: "briefing", label: b.label, mode: b.mode, training: b.training, model: b.source === "gemini" ? b.model : undefined },
+      ]);
+    };
+    window.addEventListener("argus:briefing", onBriefing);
+    return () => window.removeEventListener("argus:briefing", onBriefing);
+  }, []);
 
   async function send(text: string) {
     if (!text.trim() || busy) return;
@@ -38,10 +57,10 @@ export function AssistantPanel({ mode, operatorId }: { mode: Mode; operatorId: s
     try {
       const r = await fetch("/api/chat", {
         method: "POST",
-        body: JSON.stringify({ history: next.map(({ role, content }) => ({ role, content })) }),
+        body: JSON.stringify({ history: next.filter((m) => m.kind !== "briefing").map(({ role, content }) => ({ role, content })) }),
       });
       const j = await r.json();
-      setMsgs([...next, { role: "assistant", content: j.text, tools: j.tools, offline: j.offline, mode: j.mode }]);
+      setMsgs([...next, { role: "assistant", content: j.text, tools: j.tools, offline: j.offline, mode: j.mode, model: j.model, note: j.note }]);
       voice.speak(j.text, "normal");
     } catch {
       setMsgs([...next, { role: "assistant", content: "Assistant unavailable." }]);
@@ -79,8 +98,20 @@ export function AssistantPanel({ mode, operatorId }: { mode: Mode; operatorId: s
                   : "max-w-[95%] rounded-lg bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
               }
             >
+              {m.kind === "briefing" && (
+                <div className="mb-1">
+                  <Badge tone="yellow">
+                    <ClipboardList className="h-3 w-3" /> {m.label ?? "Task briefing"} · {m.mode}
+                  </Badge>
+                </div>
+              )}
               {m.content}
-              {m.role === "assistant" && (m.tools?.length || m.offline) ? (
+              {m.training && (
+                <Link href={`/training?m=${m.training.id}`} className="mt-1.5 flex items-center gap-1 text-xs text-cat-yellow hover:underline">
+                  <BookOpen className="h-3 w-3" /> Optional: open {m.training.title}
+                </Link>
+              )}
+              {m.role === "assistant" && (m.tools?.length || m.offline || (m.kind === "briefing" && m.model)) ? (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1">
                   {m.tools?.map((t, k) => (
                     <button key={k} onClick={() => setOpenTools(openTools === i ? null : i)}>
@@ -89,7 +120,8 @@ export function AssistantPanel({ mode, operatorId }: { mode: Mode; operatorId: s
                       </Badge>
                     </button>
                   ))}
-                  {m.offline && <Badge tone="amber">offline mode</Badge>}
+                  {m.offline && <Badge tone="amber">{m.note ?? "offline mode"}</Badge>}
+                  {m.model && <Badge>{m.model}</Badge>}
                 </div>
               ) : null}
               {openTools === i && (
@@ -116,7 +148,7 @@ export function AssistantPanel({ mode, operatorId }: { mode: Mode; operatorId: s
           placeholder="Ask Argus…"
           className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cat-yellow"
         />
-        <Button tone="primary" disabled={busy || !input.trim()}>
+        <Button type="submit" tone="primary" disabled={busy || !input.trim()}>
           <Send className="h-4 w-4" />
         </Button>
       </form>

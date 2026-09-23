@@ -2,16 +2,23 @@ import Database from "better-sqlite3";
 import path from "path";
 
 const g = globalThis as unknown as { __argusDb?: Database.Database };
+// Module-level: re-runs migrations when this module is reloaded (dev hot reload) against a cached connection
+let migrated = false;
 
 export function db(): Database.Database {
   if (!g.__argusDb) {
     const d = new Database(path.join(process.cwd(), "argus.db"));
     d.pragma("journal_mode = WAL");
     migrate(d);
+    migrated = true;
     const n = d.prepare("SELECT COUNT(*) AS n FROM operators").get() as { n: number };
     if (n.n === 0) seed(d);
     rollShiftToToday(d);
     g.__argusDb = d;
+  }
+  if (!migrated) {
+    migrate(g.__argusDb);
+    migrated = true;
   }
   return g.__argusDb;
 }
@@ -62,6 +69,9 @@ function migrate(d: Database.Database) {
   CREATE INDEX IF NOT EXISTS idx_tel_machine ON telemetry(machine_id, id);
   CREATE INDEX IF NOT EXISTS idx_inc_op ON incidents(operator_id, timestamp);
   `);
+  // resolved_at lets the score credit fast corrections (added to existing DBs without a reset)
+  const cols = d.prepare("PRAGMA table_info(incidents)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "resolved_at")) d.exec("ALTER TABLE incidents ADD COLUMN resolved_at TEXT");
 }
 
 const daysAgo = (n: number, hour = 10) => {

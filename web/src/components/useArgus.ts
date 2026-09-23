@@ -37,9 +37,15 @@ export function useArgus(pollMs = 1000) {
       if (!r.ok) return;
       const j = await r.json();
       setState(j);
-      if (!opRef.current) {
+      // The server session is the source of truth; follow it (another tab may have switched operator)
+      if (opRef.current !== j.operator.id) {
         opRef.current = j.operator.id;
         setOperatorId(j.operator.id);
+        try {
+          localStorage.setItem("argus-op", j.operator.id);
+        } catch {
+          /* ignore */
+        }
       }
       if (j.score?.mode) voice.mode = j.score.mode;
     } catch {

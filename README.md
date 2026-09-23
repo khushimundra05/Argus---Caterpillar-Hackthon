@@ -28,7 +28,7 @@ browser webcam(s) ──frames──▶ Next.js /api/cv ──▶ Python FastAPI
                                    ▼
                   SQLite ◀── statistical layer (stats.ts): idle z-score, adaptive-assistance score
                                    ▼
-                  Claude agent (agent.ts), READ-ONLY tools (tools.ts)
+                  Gemini Flash agent (agent.ts), READ-ONLY tools (tools.ts)
                                    ▼
                   Dashboard + chat + Training Hub, Web Speech API TTS (alerts interrupt speech)
 ```
@@ -55,10 +55,12 @@ If the file is missing, the service falls back to OpenCV Haar eye detection. `GE
 ```powershell
 cd web
 npm install
-copy .env.local.example .env.local   # then add ANTHROPIC_API_KEY
+copy .env.local.example .env.local   # then add GEMINI_API_KEY (free: aistudio.google.com/apikey)
 npm run dev                          # http://localhost:3000
 ```
 Without an API key, the assistant runs in **offline mode**: it calls the same read-only tools and uses templated, mode-aware replies, so the demo still works if the Wi-Fi drops.
+
+**LLM: Gemini free tier.** The agent tries each model in `GEMINI_MODELS` in order (default: Flash-Lite models first, then Flash). Each model has its own free quota, so when one returns 429 the agent moves to the next, and falls back to offline mode only when all of them are exhausted. One question costs 1–3 calls: the first picks tools, the rest answer. `GET /api/health` shows calls made today per model. You can see your actual free limits at aistudio.google.com/rate-limit. On the free tier, Google may use prompts to improve its products, so keep real operator PII out.
 
 `npm run reset-db` wipes SQLite. It reseeds on the next request.
 Or run `start-argus.ps1` from the repo root to launch both.

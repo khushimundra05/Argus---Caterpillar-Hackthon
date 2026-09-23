@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { MODULES, markComplete, recommendTraining } from "@/lib/training";
-import { sim } from "@/lib/engine";
+import { recomputeScore, sim } from "@/lib/engine";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +11,8 @@ export async function GET() {
 
 export async function POST(req: Request) {
   const { moduleId } = (await req.json()) as { moduleId: string };
-  markComplete(sim().operatorId, moduleId);
-  return NextResponse.json({ ok: true });
+  const s = sim();
+  markComplete(s.operatorId, moduleId);
+  recomputeScore(s); // completing training earns credit and halves the matching incident penalty
+  return NextResponse.json({ ok: true, score: s.score });
 }

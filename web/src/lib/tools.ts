@@ -1,6 +1,5 @@
 // READ-ONLY agent tools. None of these can write safety state, incidents, or telemetry.
 // (Incident logging lives exclusively in engine.ts and is triggered by the rules engine.)
-import type Anthropic from "@anthropic-ai/sdk";
 import { db, getMachine, getOperator, type Incident, type Task } from "./db";
 import { currentTask, etaFeaturesFor, liveEta, sim } from "./engine";
 import { predictMinutes } from "./eta";
@@ -8,7 +7,10 @@ import { searchKb } from "./kb";
 import { recommendTraining } from "./training";
 import { idleBaseline } from "./stats";
 
-export const TOOLS: Anthropic.Tool[] = [
+// Provider-neutral tool definitions (JSON Schema). agent.ts adapts them to the LLM SDK.
+export type ToolDef = { name: string; description: string; input_schema: Record<string, unknown> };
+
+export const TOOLS: ToolDef[] = [
   {
     name: "get_daily_schedule",
     description: "Get today's scheduled tasks for an operator, with status, planned minutes, and progress.",

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { CV_SERVICE_URL, MODEL } from "@/lib/config";
+import { CV_SERVICE_URL } from "@/lib/config";
+import { llmStatus } from "@/lib/agent";
 
 export const dynamic = "force-dynamic";
 
@@ -11,5 +12,11 @@ export async function GET() {
   } catch {
     cv = null;
   }
-  return NextResponse.json({ cv, llm: process.env.ANTHROPIC_API_KEY ? MODEL : "offline (no ANTHROPIC_API_KEY)" });
+  const status = llmStatus();
+  const active = status.models.find((m) => !m.cooling_down_s)?.model;
+  return NextResponse.json({
+    cv,
+    llm: !status.configured ? "offline (no GEMINI_API_KEY)" : active ? `gemini: ${active}` : "offline (free-tier quota cooling down)",
+    llmDetail: status,
+  });
 }

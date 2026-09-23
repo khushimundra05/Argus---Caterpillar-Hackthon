@@ -53,6 +53,7 @@ export function Button({
 }: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: keyof typeof btnTones; size?: "sm" | "md" }) {
   return (
     <button
+      type="button"
       className={cn(
         "inline-flex items-center justify-center gap-1.5 rounded-lg border transition-colors disabled:opacity-40",
         size === "sm" ? "px-2 py-1 text-xs" : "px-3 py-1.5 text-sm",

@@ -1,7 +1,7 @@
-// Tool-calling assistant. The LLM only READS state via tools and narrates it.
-// Assistance mode (from the rule-based score) conditions tone + verbosity via the system prompt.
-import Anthropic from "@anthropic-ai/sdk";
-import { MODEL, type Mode } from "./config";
+// Tool-calling assistant (Google Gemini, free tier). The LLM only READS state via tools and narrates it.
+// Assistance mode (from the rule-based score) conditions tone + verbosity via the system instruction.
+import { ApiError, GoogleGenAI, type Content, type FunctionCall, type GenerateContentConfig, type Part } from "@google/genai";
+import { GEMINI_MODELS, type Mode } from "./config";
 import { TOOLS, runTool, sessionContext } from "./tools";
 
 const MODE_STYLE: Record<Mode, string> = {
@@ -17,7 +17,7 @@ const MODE_STYLE: Record<Mode, string> = {
 
 function systemPrompt(mode: Mode) {
   const { op, m, t, s } = sessionContext();
-  return `You are Argus, an in-cab AI co-pilot for Caterpillar machine operators. Your replies are shown on the cab display AND read aloud by text-to-speech, so write plain spoken sentences: no markdown, no bullet symbols, no tables, no emoji.
+  return `You are Argus, an in-cab AI co-pilot for Caterpillar machine operators. Your replies are shown on the cab display AND read aloud by text-to-speech, so write plain spoken sentences: no markdown, no bullet symbols, no asterisks, no tables, no emoji.
 
 Current session:
 - Operator: ${op.name} (${op.id}), ${op.experience_years} years experience
@@ -33,68 +33,166 @@ Safety rules (non-negotiable):
 - Never tell the operator an alert is false, safe to ignore, or that they may continue while a critical alert is active. If a critical alert is active, lead with the required action from the SOP.
 - If unsure about a safety procedure, search the knowledge base; if it is not there, tell the operator to contact their supervisor.
 
-Use tools to ground every factual claim about schedule, safety state, behavior, ETA and training. Use the ids above; don't ask the operator for them.`;
+Use tools to ground every factual claim about schedule, safety state, behavior, ETA and training. Use the ids above; don't ask the operator for them. Call independent tools in parallel.`;
 }
 
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 export type ToolTrace = { name: string; input: unknown; output: unknown };
+export type ChatResult = { text: string; tools: ToolTrace[]; offline: boolean; model?: string; note?: string };
 
-export async function chat(history: ChatTurn[], mode: Mode): Promise<{ text: string; tools: ToolTrace[]; offline: boolean }> {
-  if (!process.env.ANTHROPIC_API_KEY) return offlineAnswer(history[history.length - 1]?.content ?? "", mode);
+const MAX_STEPS = 5;
+const FUNCTION_DECLARATIONS = TOOLS.map((t) => ({
+  name: t.name,
+  description: t.description,
+  parametersJsonSchema: t.input_schema,
+}));
 
-  const client = new Anthropic();
-  const messages: Anthropic.MessageParam[] = history.slice(-12).map((h) => ({ role: h.role, content: h.content }));
+// ---- Free-tier quota handling: each model has its own quota, so rotate through GEMINI_MODELS ----
+const apiKey = () => process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+
+type LlmStats = { cooldown: Record<string, number>; calls: Record<string, number>; day: string };
+const g = globalThis as unknown as { __argusLlm?: LlmStats; __argusGenAI?: GoogleGenAI };
+
+function llmStats(): LlmStats {
+  const day = new Date().toDateString();
+  if (!g.__argusLlm || g.__argusLlm.day !== day) g.__argusLlm = { cooldown: {}, calls: {}, day };
+  return g.__argusLlm;
+}
+
+export function llmStatus() {
+  const st = llmStats();
+  const now = Date.now();
+  return {
+    provider: "gemini",
+    configured: !!apiKey(),
+    models: GEMINI_MODELS.map((m) => ({
+      model: m,
+      calls_today: st.calls[m] ?? 0,
+      cooling_down_s: (st.cooldown[m] ?? 0) > now ? Math.round((st.cooldown[m] - now) / 1000) : 0,
+    })),
+  };
+}
+
+const ai = () => (g.__argusGenAI ??= new GoogleGenAI({ apiKey: apiKey() }));
+
+/** One generateContent call, falling through the model list on quota / availability errors. */
+async function generate(contents: Content[], config: GenerateContentConfig, preferred: string | null) {
+  const st = llmStats();
+  const now = Date.now();
+  const order = [preferred, ...GEMINI_MODELS].filter((m, i, a): m is string => !!m && a.indexOf(m) === i);
+  let lastErr: unknown = null;
+  for (const model of order) {
+    if ((st.cooldown[model] ?? 0) > now) continue;
+    try {
+      st.calls[model] = (st.calls[model] ?? 0) + 1;
+      const response = await ai().models.generateContent({ model, contents, config });
+      return { response, model };
+    } catch (e) {
+      lastErr = e;
+      if (e instanceof ApiError && [404, 429, 500, 503].includes(e.status)) {
+        // 429 = free-tier quota. Per-minute limits reset quickly; per-day ones don't.
+        const perDay = /per.?day|daily/i.test(e.message);
+        const wait = e.status === 429 ? (perDay ? 3600e3 : 65e3) : e.status === 404 ? 86400e3 : 20e3;
+        st.cooldown[model] = now + wait;
+        console.warn(`[argus] ${model} unavailable (${e.status}); trying next model`);
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr ?? new Error("all Gemini models are cooling down");
+}
+
+/**
+ * One-shot structured composition (task briefings, coaching) with the same free-tier model rotation.
+ * Returns null when Gemini is unavailable / slow / invalid, so callers always keep a deterministic fallback.
+ */
+export async function composeJson<T>(system: string, prompt: string, schema: object, timeoutMs = 8000): Promise<{ data: T; model: string } | null> {
+  if (!apiKey()) return null;
+  try {
+    const { response, model } = await generate(
+      [{ role: "user", parts: [{ text: prompt }] }],
+      {
+        systemInstruction: system,
+        temperature: 0.4,
+        maxOutputTokens: 2048,
+        responseMimeType: "application/json",
+        responseJsonSchema: schema,
+        abortSignal: AbortSignal.timeout(timeoutMs),
+      },
+      null,
+    );
+    return { data: JSON.parse(response.text ?? "") as T, model };
+  } catch (e) {
+    console.warn("[argus] Gemini compose failed; using template", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+export async function chat(history: ChatTurn[], mode: Mode): Promise<ChatResult> {
+  if (!apiKey()) return offlineAnswer(history[history.length - 1]?.content ?? "", mode);
+
+  const contents: Content[] = history.slice(-12).map((h) => ({
+    role: h.role === "assistant" ? "model" : "user",
+    parts: [{ text: h.content }],
+  }));
   const trace: ToolTrace[] = [];
+  let model: string | null = null;
 
   try {
-    for (let i = 0; i < 6; i++) {
-      const response = await client.messages.create({
-        model: MODEL,
-        max_tokens: 8000,
-        system: systemPrompt(mode),
-        tools: TOOLS,
-        messages,
-        output_config: { effort: "low" },
-      });
+    for (let i = 0; i < MAX_STEPS; i++) {
+      const r = await generate(
+        contents,
+        {
+          systemInstruction: systemPrompt(mode),
+          tools: [{ functionDeclarations: FUNCTION_DECLARATIONS }],
+          temperature: 0.3,
+          maxOutputTokens: 2048,
+        },
+        model,
+      );
+      model = r.model; // stay on the same model within one answer
+      const calls: FunctionCall[] = r.response.functionCalls ?? [];
 
-      if (response.stop_reason === "refusal") return { text: "I can't help with that one. Please contact your supervisor.", tools: trace, offline: false };
-      if (response.stop_reason !== "tool_use") {
-        const text = response.content
-          .filter((b): b is Anthropic.TextBlock => b.type === "text")
-          .map((b) => b.text)
-          .join(" ")
-          .trim();
-        return { text: text || "Done.", tools: trace, offline: false };
+      if (!calls.length) {
+        const text = (r.response.text ?? "").replace(/[*#`_]/g, "").trim();
+        const blocked = r.response.promptFeedback?.blockReason;
+        return {
+          text: text || (blocked ? "I can't help with that one. Please contact your supervisor." : "Done."),
+          tools: trace,
+          offline: false,
+          model,
+        };
       }
 
-      messages.push({ role: "assistant", content: response.content });
-      const toolUses = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
-      const results: Anthropic.ToolResultBlockParam[] = await Promise.all(
-        toolUses.map(async (tu) => {
+      // Keep the model's turn verbatim (preserves thought signatures), then answer every call in one turn
+      const modelTurn = r.response.candidates?.[0]?.content;
+      contents.push(modelTurn ?? { role: "model", parts: calls.map((fc) => ({ functionCall: fc })) });
+      const parts: Part[] = await Promise.all(
+        calls.map(async (fc) => {
+          const name = fc.name ?? "";
           try {
-            const out = await runTool(tu.name, (tu.input ?? {}) as Record<string, unknown>);
-            trace.push({ name: tu.name, input: tu.input, output: out });
-            return { type: "tool_result" as const, tool_use_id: tu.id, content: JSON.stringify(out) };
+            const out = await runTool(name, (fc.args ?? {}) as Record<string, unknown>);
+            trace.push({ name, input: fc.args, output: out });
+            return { functionResponse: { id: fc.id, name, response: { output: out } } };
           } catch (e) {
-            return { type: "tool_result" as const, tool_use_id: tu.id, content: String(e), is_error: true };
+            return { functionResponse: { id: fc.id, name, response: { error: String(e) } } };
           }
         }),
       );
-      messages.push({ role: "user", content: results });
+      contents.push({ role: "user", parts });
     }
-    return { text: "Sorry, that took too many steps. Please ask again.", tools: trace, offline: false };
+    return { text: "Sorry, that took too many steps. Please ask again.", tools: trace, offline: false, model: model ?? undefined };
   } catch (e) {
-    if (e instanceof Anthropic.APIError) {
-      console.error("[argus] Claude API error", e.status, e.message);
-      const fb = await offlineAnswer(history[history.length - 1]?.content ?? "", mode);
-      return { ...fb, text: `${fb.text}` };
-    }
-    throw e;
+    const status = e instanceof ApiError ? e.status : undefined;
+    console.error("[argus] Gemini error", status, e instanceof Error ? e.message : e);
+    const fb = await offlineAnswer(history[history.length - 1]?.content ?? "", mode);
+    return { ...fb, note: status === 429 || !status ? "free-tier quota reached — offline mode" : `LLM error ${status} — offline mode` };
   }
 }
 
 // ---------- Offline fallback: same read-only tools, templated narration by mode ----------
-async function offlineAnswer(q: string, mode: Mode): Promise<{ text: string; tools: ToolTrace[]; offline: boolean }> {
+async function offlineAnswer(q: string, mode: Mode): Promise<ChatResult> {
   const { s, op, t } = sessionContext();
   const trace: ToolTrace[] = [];
   const call = async (name: string, input: Record<string, unknown>) => {
@@ -134,5 +232,5 @@ async function offlineAnswer(q: string, mode: Mode): Promise<{ text: string; too
     const hits = await call("search_knowledge_base", { query: q });
     text = hits.length ? `From ${hits[0].source}: ${hits[0].text}${!terse && hits[1] ? ` Also, ${hits[1].text}` : ""}` : "I couldn't find that in the manuals. Please check with your supervisor.";
   }
-  return { text: `${text}`, tools: trace, offline: true };
+  return { text, tools: trace, offline: true };
 }

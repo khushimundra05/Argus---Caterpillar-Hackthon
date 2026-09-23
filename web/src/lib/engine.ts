@@ -1,7 +1,7 @@
 // Telemetry simulator + DETERMINISTIC safety engine.
 // This module is the ONLY writer of safety state and incidents. The LLM never touches it.
 import { db, getMachine, getOperator, kvGet, kvSet, type Task } from "./db";
-import { ANOMALY, SAFETY, type Mode } from "./config";
+import { ANOMALY, SAFETY, SCORE, type Mode } from "./config";
 import { computeScore, idleBaseline, rollingIdleRatio, type ScoreBreakdown } from "./stats";
 import { predictMinutes, type EtaResult } from "./eta";
 
@@ -41,6 +41,8 @@ export type SimState = {
   openIncidents: Partial<Record<AlertType, number>>;
   idleAnomalyActive: boolean;
   idleEpisodeLogged: boolean;
+  idleNudged: boolean; // reached the idle-cost nudge in the current idle period
+  safeStreakSec: number; // incident-free engine time toward the next safe-streak reward
   lastZ: number;
   lastIdleRatio: number;
   cv: { driver: DriverCv | null; zone: ZoneCv | null };
@@ -79,6 +81,8 @@ function fresh(operatorId: string): SimState {
     openIncidents: {},
     idleAnomalyActive: false,
     idleEpisodeLogged: false,
+    idleNudged: false,
+    safeStreakSec: 0,
     lastZ: 0,
     lastIdleRatio: 0,
     cv: { driver: null, zone: null },
@@ -102,8 +106,11 @@ export function startSession(operatorId: string): SimState {
   return s;
 }
 
+/** Current session. `operatorId` is only used to initialise when no session exists (e.g. after a server
+ *  restart). Switching operators goes exclusively through startSession() via POST /api/session, so a poll
+ *  from another tab with a stale operator id can never reset the running machine state. */
 export function sim(operatorId?: string): SimState {
-  if (!g.__argusSim || (operatorId && g.__argusSim.operatorId !== operatorId)) {
+  if (!g.__argusSim) {
     const saved = kvGet<{ op: string; start: string } | null>("shift", null);
     return startSession(operatorId ?? saved?.op ?? "OP-101");
   }
@@ -170,7 +177,7 @@ export function tick(): SimState {
   const rpm = !s.engineOn ? 0 : cycling ? 1650 + Math.round(Math.random() * 150) : 820 + Math.round(Math.random() * 40);
 
   evaluateSafety(s, rpm);
-  evaluateBehavior(s);
+  evaluateBehavior(s, dt);
 
   d.prepare(
     `INSERT INTO telemetry (machine_id,operator_id,timestamp,fuel_used,load_cycles,idling_seconds,is_idle,seatbelt_on,proximity_m,rpm,safety_alert)
@@ -265,17 +272,36 @@ function evaluateSafety(s: SimState, rpm: number) {
   }
   for (const type of Object.keys(s.openIncidents) as AlertType[]) {
     if (!next[type] || next[type]!.severity !== "critical") {
-      db().prepare("UPDATE incidents SET resolved=1 WHERE id=?").run(s.openIncidents[type]!);
+      db().prepare("UPDATE incidents SET resolved=1, resolved_at=? WHERE id=?").run(new Date().toISOString(), s.openIncidents[type]!);
       delete s.openIncidents[type];
       pushEvent(s, "resolved", `${type} cleared`);
+      changed = true; // resolution time feeds the fast-correction credit
     }
   }
   s.alerts = next;
   if (changed) recomputeScore(s);
 }
 
-function evaluateBehavior(s: SimState) {
+function logBehavior(s: SimState, type: string, detail: unknown) {
+  db().prepare("INSERT INTO behavior_logs (operator_id,timestamp,event_type,detail) VALUES (?,?,?,?)").run(
+    s.operatorId, new Date().toISOString(), type, JSON.stringify(detail),
+  );
+}
+
+function evaluateBehavior(s: SimState, dt: number) {
   const d = db();
+  let rescore = false;
+
+  // Positive: incident-free engine time -> safe-streak reward
+  const critical = Object.values(s.alerts).some((a) => a?.severity === "critical");
+  if (critical) s.safeStreakSec = 0;
+  else if (s.engineOn) s.safeStreakSec += dt;
+  if (s.safeStreakSec >= SCORE.safeStreakBlockSec) {
+    s.safeStreakSec = 0;
+    logBehavior(s, "SAFE_STREAK", { seconds: SCORE.safeStreakBlockSec });
+    pushEvent(s, "reward", `Safe streak: ${Math.round(SCORE.safeStreakBlockSec / 60)} incident-free minutes — well done.`);
+    rescore = true;
+  }
   // Idle z-score vs this operator's historical baseline
   const { ratio, n } = rollingIdleRatio(s.operatorId, s.shiftStart, ANOMALY.windowTicks);
   const base = idleBaseline(s.operatorId);
@@ -304,6 +330,17 @@ function evaluateBehavior(s: SimState) {
       s.operatorId, new Date().toISOString(), "REPEATED_SEATBELT", JSON.stringify({ count: belts }),
     );
     pushEvent(s, "anomaly", `Unsafe pattern: ${belts} seatbelt violations this shift`);
+    rescore = true;
+  }
+  // Positive: idle period ended after the cost nudge but before it became excessive
+  if (s.idleContinuousSec >= SAFETY.idleNudgeSec) s.idleNudged = true;
+  if (s.idleContinuousSec === 0 && s.idleNudged) {
+    if (!s.idleEpisodeLogged) {
+      logBehavior(s, "NUDGE_RESPONDED", {});
+      pushEvent(s, "reward", "Thanks for acting on the idle nudge — fuel saved.");
+      rescore = true;
+    }
+    s.idleNudged = false;
   }
   // Excessive idle episode (logged once per continuous idle period)
   if (s.idleContinuousSec === 0) s.idleEpisodeLogged = false;
@@ -313,12 +350,14 @@ function evaluateBehavior(s: SimState) {
       s.operatorId, new Date().toISOString(), "EXCESSIVE_IDLE", JSON.stringify({ seconds: Math.round(s.idleContinuousSec) }),
     );
     pushEvent(s, "anomaly", `Excessive idling (${Math.round(s.idleContinuousSec)} s continuous)`);
+    rescore = true;
   }
+  if (rescore) recomputeScore(s);
 }
 
 export function recomputeScore(s: SimState) {
   const prev = s.score?.mode;
-  s.score = computeScore(s.operatorId, s.shiftStart);
+  s.score = computeScore(s.operatorId, s.shiftStart, prev ?? null);
   if (prev && prev !== s.score.mode) pushEvent(s, "mode", `Assistance mode → ${s.score.mode} (score ${s.score.score})`);
 }
 

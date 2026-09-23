@@ -1,0 +1,86 @@
+{
+  "_general_safety": [
+    "Seatbelt fastened before you move, and keep it on for the whole task.",
+    "Check mirrors and cameras, and sound the horn before you start moving."
+  ],
+  "_weather": {
+    "rain": "It is raining: reduce travel speed, avoid side slopes over 15 degrees, and allow extra stopping distance.",
+    "heavy_rain": "Heavy rain: travel slowly, stay off side slopes, watch for soft ground and trench-edge collapse, and stop if visibility drops.",
+    "dust": "Dusty conditions: keep lights on, slow down, and stop if you lose sight of ground crew.",
+    "snow": "Snow and ice: travel slowly, avoid slopes, and warm up the hydraulics before full loads."
+  },
+  "_temperature": {
+    "hot": "High temperature: stay hydrated and watch the coolant temperature gauge.",
+    "cold": "Below freezing: warm up the hydraulic system for five minutes before working."
+  },
+  "trenching": {
+    "safety": [
+      "Confirm underground utilities are marked before the first bite.",
+      "Keep the tracks at least one metre back from the trench edge.",
+      "Nobody enters the trench or the swing radius while you are digging."
+    ],
+    "steps": [
+      { "do": "Position the machine square to the trench line with the tracks parallel to it.", "why": "It keeps the machine stable and the trench straight." },
+      { "do": "Take shallow, even passes instead of one deep bite.", "why": "It reduces wall collapse and strain on the boom." },
+      { "do": "Place spoil at least half a metre back from the edge, on the side away from the crew.", "why": "Spoil near the edge adds load and can slide back in." },
+      { "do": "Check the grade with the spotter every few metres.", "why": "Fixing depth early is much cheaper than re-digging." }
+    ],
+    "tip": "Keep the bucket curl smooth while crowding, and fill the bucket fully each pass.",
+    "training": "TM-TASK-TRENCHING"
+  },
+  "truck_loading": {
+    "safety": [
+      "Never swing the bucket over the truck cab.",
+      "The truck driver stays in the cab, or well outside the swing radius.",
+      "Wait for the truck to stop fully, and for the driver's signal, before loading."
+    ],
+    "steps": [
+      { "do": "Set the truck at a 30 to 45 degree swing angle.", "why": "Every extra 15 degrees of swing adds about a second per cycle." },
+      { "do": "Load the front of the truck bed first, then the back.", "why": "It keeps the truck's axle loads balanced." },
+      { "do": "Lower the bucket close to the bed before dumping.", "why": "It prevents spillage and damage to the truck." },
+      { "do": "Count the passes to hit the target load without overloading.", "why": "Overloads damage haul trucks and slow the whole cycle." }
+    ],
+    "tip": "Have the next bucket full and ready while the truck positions.",
+    "training": "TM-TASK-LOADING"
+  },
+  "backfill": {
+    "safety": [
+      "Confirm the trench is empty of people and equipment before backfilling.",
+      "Keep the machine off the trench edge while pushing material in."
+    ],
+    "steps": [
+      { "do": "Place material in even layers of about 300 millimetres.", "why": "Even layers compact properly and prevent settling later." },
+      { "do": "Push material in from the side instead of dropping it from height.", "why": "Dropping material can damage pipes and utilities." },
+      { "do": "Let the compaction crew finish each layer before adding the next.", "why": "Uncompacted layers fail inspection and must be dug out." }
+    ],
+    "tip": "Keep the spoil pile close so each cycle stays short.",
+    "training": "TM-TASK-BACKFILL"
+  },
+  "grading": {
+    "safety": [
+      "Watch for survey stakes and ground crew, and look behind before every reverse.",
+      "Keep blade loads moderate on slopes to stay stable."
+    ],
+    "steps": [
+      { "do": "Walk or review the area first, and note high and low spots.", "why": "Planning the passes saves time and fuel." },
+      { "do": "Make long, overlapping passes at a steady speed.", "why": "Consistent speed gives a smoother finish." },
+      { "do": "Cut high spots and fill low spots in the same pass where possible.", "why": "It avoids double handling of material." },
+      { "do": "Check the grade against the stakes after each few passes.", "why": "Small corrections are easier than rework." }
+    ],
+    "tip": "Keep a full, rolling load in front of the blade.",
+    "training": "TM-TASK-GRADING"
+  },
+  "stockpiling": {
+    "safety": [
+      "Never undercut the stockpile face.",
+      "Keep ground crew away from the toe of the pile."
+    ],
+    "steps": [
+      { "do": "Build the pile in layers instead of pushing over the top edge.", "why": "Layered piles are stable and don't slump." },
+      { "do": "Keep a consistent approach ramp.", "why": "It speeds up each cycle and keeps the machine level." },
+      { "do": "Keep material types separate as marked.", "why": "Mixed material is rejected later." }
+    ],
+    "tip": "Plan the pile shape so you never have to push uphill with a full load.",
+    "training": "TM-TASK-STOCKPILING"
+  }
+}
