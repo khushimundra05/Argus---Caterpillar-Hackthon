@@ -1,0 +1,95 @@
+[
+  {
+    "id": "TM-VIDEO",
+    "title": "Featured Video: Operator Walkaround & Safe Mounting",
+    "trigger_tag": "GENERAL",
+    "duration_min": 8,
+    "level": "All operators",
+    "video": "/training/featured.mp4",
+    "summary": "Your site's featured training video. Drop an .mp4 at web/public/training/featured.mp4 to enable it.",
+    "sections": [
+      { "heading": "What to watch for", "body": "Three points of contact when mounting, walkaround inspection order, and cab checks before start-up." }
+    ],
+    "quiz": [
+      { "q": "How many points of contact should you keep when mounting the machine?", "options": ["One", "Two", "Three"], "answer": 2 }
+    ]
+  },
+  {
+    "id": "TM-SEATBELT",
+    "title": "Seatbelt & Rollover Protection (ROPS)",
+    "trigger_tag": "SEATBELT",
+    "duration_min": 10,
+    "level": "Mandatory",
+    "summary": "Why the seatbelt is the single most effective protection in a rollover or sudden stop.",
+    "sections": [
+      { "heading": "Why it matters", "body": "ROPS only protects you if you stay inside the protective zone. Without a belt, operators can be thrown from the cab and crushed by the machine they were operating." },
+      { "heading": "Correct use", "body": "Fasten before starting the engine. Belt low across the hips, snug, not twisted. Inspect for fraying and buckle function at every pre-start check." },
+      { "heading": "Common excuses", "body": "'I am only moving it a few metres' - most rollovers happen during short repositioning moves on slopes and soft ground." }
+    ],
+    "quiz": [
+      { "q": "When should the seatbelt be fastened?", "options": ["Before starting the engine", "Once working on a slope", "Only when travelling"], "answer": 0 },
+      { "q": "ROPS protects you when...", "options": ["The door is open", "You remain belted inside the cab", "The machine is idling"], "answer": 1 }
+    ]
+  },
+  {
+    "id": "TM-PROXIMITY",
+    "title": "Hazard Zones & Ground Personnel Awareness",
+    "trigger_tag": "PROXIMITY",
+    "duration_min": 12,
+    "level": "Mandatory",
+    "summary": "Swing radius, blind spots, and communication protocols with ground crew.",
+    "sections": [
+      { "heading": "Swing radius", "body": "Treat the full swing radius plus 1 m as an exclusion zone. Stop all motion when anyone enters it." },
+      { "heading": "Blind spots", "body": "Rear and right-rear are the largest blind spots on excavators and loaders. Use cameras and mirrors; sound the horn before moving." },
+      { "heading": "Communication", "body": "Establish eye contact or radio confirmation before any ground worker approaches. Lower the bucket and neutralise controls." }
+    ],
+    "quiz": [
+      { "q": "A person walks into the swing radius. What do you do first?", "options": ["Swing away from them", "Stop all motion", "Sound the horn and continue"], "answer": 1 }
+    ]
+  },
+  {
+    "id": "TM-FATIGUE",
+    "title": "Fatigue Management for Operators",
+    "trigger_tag": "DROWSINESS",
+    "duration_min": 9,
+    "level": "Mandatory",
+    "summary": "Recognising micro-sleeps and what to do before they cause an incident.",
+    "sections": [
+      { "heading": "Warning signs", "body": "Heavy eyelids, frequent blinking, drifting attention, missing radio calls. Micro-sleeps last 1-10 seconds - long enough to travel 20 m." },
+      { "heading": "What to do", "body": "Park safely, lower attachments, notify your supervisor. Short breaks, hydration and cab ventilation help; caffeine only masks fatigue." }
+    ],
+    "quiz": [
+      { "q": "A micro-sleep typically lasts...", "options": ["Under 0.1 s", "1-10 seconds", "Several minutes"], "answer": 1 }
+    ]
+  },
+  {
+    "id": "TM-IDLE",
+    "title": "Fuel Efficiency & Idle Reduction",
+    "trigger_tag": "IDLE",
+    "duration_min": 7,
+    "level": "Recommended",
+    "summary": "Every idle hour burns fuel, adds engine hours and shortens service intervals.",
+    "sections": [
+      { "heading": "The cost", "body": "A mid-size excavator burns ~4 L/h at idle. One hour of idle a day across a 20-machine fleet is roughly 20,000 L a year." },
+      { "heading": "Habits", "body": "Shut down if waiting more than 5 minutes. Use auto-idle and engine idle shutdown features. Plan truck arrivals to reduce waiting." }
+    ],
+    "quiz": [
+      { "q": "Waiting for a truck for 8 minutes - best practice?", "options": ["Keep engine at high idle", "Shut down / use auto-idle shutdown", "Keep cycling the boom"], "answer": 1 }
+    ]
+  },
+  {
+    "id": "TM-CYCLE",
+    "title": "Efficient Load Cycles",
+    "trigger_tag": "CYCLE_TIME",
+    "duration_min": 11,
+    "level": "Skill builder",
+    "summary": "Positioning, swing angle and bucket fill technique to cut cycle time.",
+    "sections": [
+      { "heading": "Positioning", "body": "Keep the truck at a 30-45 degree swing angle. Every extra 15 degrees of swing adds ~1 s per cycle." },
+      { "heading": "Bucket fill", "body": "Curl the bucket smoothly while crowding. Full buckets on fewer passes beat fast partial buckets." }
+    ],
+    "quiz": [
+      { "q": "Ideal truck swing angle for an excavator?", "options": ["30-45 degrees", "90 degrees", "180 degrees"], "answer": 0 }
+    ]
+  }
+]
