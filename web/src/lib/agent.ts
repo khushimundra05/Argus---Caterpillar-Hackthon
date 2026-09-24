@@ -33,7 +33,9 @@ Safety rules (non-negotiable):
 - Never tell the operator an alert is false, safe to ignore, or that they may continue while a critical alert is active. If a critical alert is active, lead with the required action from the SOP.
 - If unsure about a safety procedure, search the knowledge base; if it is not there, tell the operator to contact their supervisor.
 
-Use tools to ground every factual claim about schedule, safety state, behavior, ETA and training. Use the ids above; don't ask the operator for them. Call independent tools in parallel.`;
+Use tools to ground every factual claim about schedule, safety state, behavior, ETA and training. Use the ids above; don't ask the operator for them. Call independent tools in parallel.
+
+When the operator asks for their schedule or tasks, name every task with its start time in one sentence, even in the briefest mode; the mode's length limit applies to everything else.`;
 }
 
 export type ChatTurn = { role: "user" | "assistant"; content: string };
@@ -224,10 +226,15 @@ async function offlineAnswer(q: string, mode: Mode): Promise<ChatResult> {
     text = `Your live idle ratio is ${Math.round((b.live_idle_ratio ?? 0) * 100)} percent against a baseline of ${Math.round(b.idle_baseline.mean * 100)} percent, z-score ${b.idle_z_score}. ${b.flags_last_7_days.length} behavior flags this week.`;
   } else if (/schedul|task|today|next/.test(lq)) {
     const sch = await call("get_daily_schedule", { operator_id: op.id });
-    const next = sch.find((x: { status: string }) => x.status !== "completed");
-    text = terse
-      ? `${sch.filter((x: { status: string }) => x.status === "completed").length} of ${sch.length} done. Next: ${next?.name ?? "none"}.`
-      : `You have ${sch.length} tasks today. ${next ? `Next up is ${next.name} at ${next.scheduled_start}, planned for ${next.planned_minutes} minutes.` : "All tasks are complete, great work."}`;
+    type Row = { name: string; scheduled_start: string; status: string; planned_minutes: number };
+    const next = (sch as Row[]).find((x) => x.status !== "completed");
+    // One sentence, so voice trimming in the terse modes still speaks the whole list
+    const list = (sch as Row[])
+      .map((x) => `${x.name} at ${x.scheduled_start}${terse ? "" : ` for ${x.planned_minutes} minutes`}${x.status === "completed" ? " (done)" : ""}`)
+      .join(", ");
+    text = !sch.length
+      ? "No tasks scheduled today."
+      : `${terse ? `${sch.length} tasks today` : `You have ${sch.length} tasks today`}: ${list}; ${next ? `next is ${next.name}.` : "all complete, great work."}`;
   } else {
     const hits = await call("search_knowledge_base", { query: q });
     text = hits.length ? `From ${hits[0].source}: ${hits[0].text}${!terse && hits[1] ? ` Also, ${hits[1].text}` : ""}` : "I couldn't find that in the manuals. Please check with your supervisor.";

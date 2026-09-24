@@ -1,9 +1,10 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { BookOpen, Bot, ClipboardList, Send, Wrench } from "lucide-react";
-import { Badge, Button, Card, CardTitle } from "./ui";
+import { BookOpen, Bot, ClipboardList, Mic, Send, Wrench } from "lucide-react";
+import { Badge, Button, Card, CardTitle, cn } from "./ui";
 import { voice, type Mode } from "./voice";
+import { useSpeechInput } from "./useSpeechInput";
 
 type Msg = {
   role: "user" | "assistant"; content: string; tools?: { name: string; input: unknown; output: unknown }[];
@@ -69,6 +70,32 @@ export function AssistantPanel({ mode, operatorId }: { mode: Mode; operatorId: s
     }
   }
 
+  const speech = useSpeechInput(send);
+  const { supported, start, stop } = speech;
+
+  // Hold Space anywhere (outside text fields) to talk, like a joystick push-to-talk button.
+  useEffect(() => {
+    if (!supported) return;
+    const typing = (t: EventTarget | null) =>
+      t instanceof HTMLElement && (["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName) || t.isContentEditable);
+    const down = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || typing(e.target)) return;
+      e.preventDefault();
+      if (!e.repeat && !busy) start();
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || typing(e.target)) return;
+      e.preventDefault();
+      stop();
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
+  }, [supported, busy, start, stop]);
+
   return (
     <Card className="flex min-h-[420px] flex-col">
       <CardTitle icon={<Bot className="h-4 w-4" />} right={<Badge tone="yellow">{mode}</Badge>}>
@@ -78,7 +105,8 @@ export function AssistantPanel({ mode, operatorId }: { mode: Mode; operatorId: s
         {msgs.length === 0 && (
           <div className="space-y-2">
             <p className="text-xs text-zinc-500">
-              Ask anything. Answers are grounded in live machine state via read-only tools and spoken aloud. Tone adapts to your assistance mode.
+              Ask anything{supported ? " (hold the mic or Space to talk)" : ""}. Answers are grounded in live machine state via read-only tools and
+              spoken aloud. Tone adapts to your assistance mode.
             </p>
             <div className="flex flex-wrap gap-1.5">
               {SUGGESTIONS.map((s) => (
@@ -143,15 +171,39 @@ export function AssistantPanel({ mode, operatorId }: { mode: Mode; operatorId: s
         }}
       >
         <input
-          value={input}
+          value={speech.listening ? speech.interim : input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask Argus…"
-          className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cat-yellow"
+          readOnly={speech.listening}
+          placeholder={speech.listening ? "Listening…" : "Ask Argus…"}
+          className={cn(
+            "flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cat-yellow",
+            speech.listening && "border-red-500",
+          )}
         />
+        {supported && (
+          <Button
+            type="button"
+            tone={speech.listening ? "danger" : "default"}
+            disabled={busy}
+            title="Hold to talk (or hold Space)"
+            aria-label="Hold to talk"
+            className={cn("touch-none select-none", speech.listening && "animate-flash")}
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId);
+              start();
+            }}
+            onPointerUp={stop}
+            onPointerCancel={stop}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <Mic className="h-4 w-4" />
+          </Button>
+        )}
         <Button type="submit" tone="primary" disabled={busy || !input.trim()}>
           <Send className="h-4 w-4" />
         </Button>
       </form>
+      {speech.error && <p className="mt-1.5 text-xs text-amber-400">{speech.error}</p>}
     </Card>
   );
 }

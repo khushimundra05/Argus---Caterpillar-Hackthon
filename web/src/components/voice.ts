@@ -19,7 +19,9 @@ class VoiceManager {
   enabled = true;
   mode: Mode = "Assist";
   private current: SpeechSynthesisUtterance | null = null;
+  private currentIsAlert = false;
   private queue: string[] = [];
+  private held = false;
   private voice: SpeechSynthesisVoice | null = null;
   private primary = false;
 
@@ -92,7 +94,8 @@ class VoiceManager {
 
   /** Mode-dependent trimming for normal (non-alert) speech. */
   private shape(text: string) {
-    const sentences = text.match(/[^.!?]+[.!?]*/g) ?? [text];
+    // Break only where punctuation is followed by a new capitalised sentence, so "7 a.m., then" or "2.5 m" stay whole
+    const sentences = text.trim().split(/(?<=[.!?])\s+(?=[A-Z"'])/);
     if (this.mode === "Silent Guardian") return sentences.slice(0, 1).join(" ");
     if (this.mode === "Assist") return sentences.slice(0, 2).join(" ");
     return text;
@@ -110,6 +113,7 @@ class VoiceManager {
       this.utter(text, true);
       return;
     }
+    if (this.held) return; // operator is talking; don't let the mic hear us
     const shaped = priority === "normal" ? this.shape(text) : text;
     if (this.current || synth.speaking || synth.pending) this.queue.push(shaped);
     else this.utter(shaped, false);
@@ -123,6 +127,7 @@ class VoiceManager {
     u.pitch = isAlert ? 1.1 : 1.0;
     u.volume = 1;
     this.current = u;
+    this.currentIsAlert = isAlert;
     const done = () => {
       if (this.current !== u) return; // a cancelled/replaced utterance finishing late must not advance the queue
       this.current = null;
@@ -132,6 +137,17 @@ class VoiceManager {
     u.onend = done;
     u.onerror = done;
     synth.speak(u);
+  }
+
+  /** Push-to-talk: silence normal speech while the mic is open. Alerts still interrupt. */
+  hold(on: boolean) {
+    this.held = on;
+    if (!on) return;
+    this.queue = [];
+    if (this.current && !this.currentIsAlert) {
+      this.current = null;
+      this.synth?.cancel();
+    }
   }
 
   stop() {
