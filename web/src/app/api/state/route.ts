@@ -15,7 +15,11 @@ export async function GET(req: Request) {
   const m = getMachine(s.machineId)!;
   const tasks = (d
     .prepare("SELECT * FROM tasks WHERE operator_id=? AND kind='shift' ORDER BY scheduled_start")
-    .all(s.operatorId) as Task[]).map((t) => ({ ...t, eta: t.status === "in_progress" ? liveEta(s, t) : null }));
+    .all(s.operatorId) as Task[]).map((t) => ({
+    ...t,
+    eta: t.status === "in_progress" ? liveEta(s, t) : null,
+    briefing: s.briefingTaskId === t.id, // held until its spoken briefing finishes
+  }));
   const incidents = d
     .prepare("SELECT * FROM incidents WHERE operator_id=? ORDER BY id DESC LIMIT 12")
     .all(s.operatorId) as Incident[];

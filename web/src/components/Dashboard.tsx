@@ -1,14 +1,15 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  Activity, AlertTriangle, BookOpen, CheckCircle2, CircleDot, Clock, CloudRain, Flag, Fuel, Gauge, History,
+  Activity, AlertTriangle, BookOpen, CheckCircle2, CircleDot, ClipboardList, Clock, FileText, CloudRain, Flag, Fuel, Gauge, History,
   Pause, Play, Power, ShieldCheck, Sliders, Timer,
 } from "lucide-react";
 import { Badge, Button, Card, CardTitle, Stat, cn } from "./ui";
 import { TopBar } from "./TopBar";
 import { CameraPanel } from "./CameraPanel";
 import { AssistantPanel } from "./AssistantPanel";
+import { ShiftReport } from "./ShiftReport";
 import { useArgus } from "./useArgus";
 import { alertPhrase, voice, type Mode } from "./voice";
 
@@ -18,6 +19,7 @@ const fmtDur = (s: number) => (s < 60 ? `${Math.round(s)}s` : s < 3600 ? `${Math
 export default function Dashboard() {
   const { state: S, operatorId, switchOperator, health, voiceOn, toggleVoice, post, refresh } = useArgus(1000);
   useAlertVoice(S);
+  const [reportOpen, setReportOpen] = useState(false);
 
   // Start a task, then speak + show the briefing (safety for all, how-to depth by proficiency)
   const startTask = async (taskId: number) => {
@@ -25,7 +27,10 @@ export default function Dashboard() {
     const j = await r.json().catch(() => null);
     refresh();
     if (j?.briefing) {
-      voice.speak(j.briefing.spoken, "full");
+      // The task stays on hold until the briefing has been spoken; then its cycles and timer start
+      voice.speak(j.briefing.spoken, "full", () => {
+        fetch("/api/tasks", { method: "POST", body: JSON.stringify({ action: "briefing_done", taskId }) }).then(refresh, refresh);
+      });
       window.dispatchEvent(new CustomEvent("argus:briefing", { detail: { ...j.briefing, label: "Task briefing" } }));
     }
   };
@@ -90,12 +95,21 @@ export default function Dashboard() {
         )}
       </div>
 
+      {reportOpen && <ShiftReport onClose={() => setReportOpen(false)} />}
+
       <main className="mx-auto grid max-w-[1600px] gap-4 p-4 lg:grid-cols-12">
         {/* LEFT: plan */}
         <section className="space-y-4 lg:col-span-4">
           <Card>
-            <CardTitle icon={<Clock className="h-4 w-4" />} right={<span className="text-xs text-zinc-500">{S.operator.name}</span>}>
-              Today&apos;s tasks
+            <CardTitle
+              icon={<Clock className="h-4 w-4" />}
+              right={
+                <Button size="sm" onClick={() => setReportOpen(true)} title="End-of-shift report for the supervisor">
+                  <FileText className="h-3.5 w-3.5" /> Shift report
+                </Button>
+              }
+            >
+              Today&apos;s tasks · {S.operator.name}
             </CardTitle>
             <div className="space-y-2">
               {S.tasks.map((t: Task) => (
@@ -227,6 +241,7 @@ type Task = {
   id: number; name: string; status: string; scheduled_start: string; estimated_minutes: number; actual_minutes: number | null;
   cycles_done: number; target_cycles: number;
   eta: { total_minutes: number; remaining_minutes: number; progress: number; source: string } | null;
+  briefing?: boolean;
 };
 type TrainingRec = { id: string; title: string; reason: string | null; duration_min: number; priority: number };
 
@@ -270,7 +285,12 @@ function TaskRow({
           <div className="h-1.5 overflow-hidden rounded bg-zinc-800">
             <div className="h-full bg-cat-yellow transition-all" style={{ width: `${pct}%` }} />
           </div>
-          {t.eta && (
+          {t.briefing && (
+            <div className="mt-1.5 flex items-center gap-1 text-xs text-cat-yellow">
+              <ClipboardList className="h-3.5 w-3.5" /> Briefing in progress. The task starts when the instructions finish.
+            </div>
+          )}
+          {t.eta && !t.briefing && (
             <div className="mt-1.5 flex items-center justify-between text-xs">
               <span className="flex items-center gap-1 text-zinc-300">
                 <Timer className="h-3.5 w-3.5 text-cat-yellow" />
@@ -287,32 +307,64 @@ function TaskRow({
   );
 }
 
-function ScoreCard({ score }: { score: { score: number; mode: string; terms: { label: string; delta: number }[] } }) {
+type ScoreView = {
+  score: number; mode: string; terms: { label: string; delta: number }[];
+  source?: "formula" | "model";
+  bands?: { coaching: number; assist: number; silent_guardian: number };
+  model?: { version: string; incident_risk: number; formula_score: number; formula_mode: string };
+};
+
+function ScoreCard({ score }: { score: ScoreView }) {
+  const b = score.bands ?? { coaching: 40, assist: 66, silent_guardian: 86 };
   const bands = [
-    ["Instructor", 0, 40, "bg-red-500"],
-    ["Coaching", 40, 66, "bg-amber-500"],
-    ["Assist", 66, 86, "bg-sky-500"],
-    ["Silent Guardian", 86, 101, "bg-emerald-500"],
+    ["Instructor", 0, b.coaching, "bg-red-500"],
+    ["Coaching", b.coaching, b.assist, "bg-amber-500"],
+    ["Assist", b.assist, b.silent_guardian, "bg-sky-500"],
+    ["Silent Guardian", b.silent_guardian, 100, "bg-emerald-500"],
   ] as const;
+  const model = score.source === "model" ? score.model : undefined;
   return (
     <Card>
-      <CardTitle icon={<Gauge className="h-4 w-4" />} right={<span className="text-xs text-zinc-500">rule-based, recomputed on every event</span>}>
+      <CardTitle
+        icon={<Gauge className="h-4 w-4" />}
+        right={
+          <span className="text-xs text-zinc-500">
+            {model ? `ML model ${model.version}, recomputed on every event` : "rule-based, recomputed on every event"}
+          </span>
+        }
+      >
         Adaptive assistance
       </CardTitle>
       <div className="flex items-end gap-3">
         <div className="text-4xl font-bold tabular-nums text-zinc-100">{score.score}</div>
         <div className="pb-1 text-sm font-semibold text-cat-yellow">{score.mode}</div>
+        {model && (
+          <div className="ml-auto pb-1 text-right text-[11px] leading-tight text-zinc-500">
+            {Math.round(model.incident_risk * 100)}% risk of an incident
+            <br />
+            in the next 5 shifts
+          </div>
+        )}
       </div>
       <div className="relative mt-2 flex h-2 overflow-hidden rounded">
-        {bands.map(([n, a, b, c]) => (
-          <div key={n} className={cn(c, score.mode === n ? "opacity-100" : "opacity-25")} style={{ width: `${b - a}%` }} />
+        {bands.map(([n, lo, hi, c]) => (
+          <div key={n} className={cn(c, score.mode === n ? "opacity-100" : "opacity-25")} style={{ width: `${hi - lo}%` }} />
         ))}
         <div className="absolute top-[-3px] h-3.5 w-1 rounded bg-white" style={{ left: `calc(${score.score}% - 2px)` }} />
       </div>
       <div className="mt-3 space-y-1 text-xs">
         <div className="flex justify-between text-zinc-500">
-          <span>base</span>
-          <span>100</span>
+          {model ? (
+            <>
+              <span>top factors vs a typical operator</span>
+              <span>points</span>
+            </>
+          ) : (
+            <>
+              <span>base</span>
+              <span>100</span>
+            </>
+          )}
         </div>
         {score.terms.map((t) => (
           <div key={t.label} className="flex justify-between">
@@ -323,6 +375,14 @@ function ScoreCard({ score }: { score: { score: number; mode: string; terms: { l
             </span>
           </div>
         ))}
+        {model && (
+          <div className="flex justify-between border-t border-zinc-800 pt-1 text-zinc-500">
+            <span>rule-based formula (fallback)</span>
+            <span className="tabular-nums">
+              {model.formula_score} · {model.formula_mode}
+            </span>
+          </div>
+        )}
       </div>
     </Card>
   );

@@ -1,0 +1,51 @@
+{
+  "held_out_by_mode": {
+    "Instructor": {
+      "share": 0.122,
+      "observed_incident_rate": 0.582
+    },
+    "Coaching": {
+      "share": 0.414,
+      "observed_incident_rate": 0.439
+    },
+    "Assist": {
+      "share": 0.324,
+      "observed_incident_rate": 0.225
+    },
+    "Silent Guardian": {
+      "share": 0.14,
+      "observed_incident_rate": 0.202
+    }
+  },
+  "formula_by_mode_same_rows": {
+    "Instructor": {
+      "share": 0.021,
+      "observed_incident_rate": 0.529
+    },
+    "Coaching": {
+      "share": 0.152,
+      "observed_incident_rate": 0.477
+    },
+    "Assist": {
+      "share": 0.278,
+      "observed_incident_rate": 0.497
+    },
+    "Silent Guardian": {
+      "share": 0.549,
+      "observed_incident_rate": 0.241
+    }
+  },
+  "sensitivity_points_from_median_operator": {
+    "median_operator_score": 68,
+    "+1 seatbelt incident (7d)": -1,
+    "+1 proximity incident (7d)": 0,
+    "+1 drowsiness this shift": 0,
+    "+2 idle anomalies (7d)": 0,
+    "all alerts corrected slowly (pct_fast 0, median 15 s)": -1,
+    "+1 relevant training module": 5
+  },
+  "http_latency_ms": {
+    "p50": 12.2,
+    "p95": 18.6
+  }
+}

@@ -1,9 +1,10 @@
 // Telemetry simulator + DETERMINISTIC safety engine.
 // This module is the ONLY writer of safety state and incidents. The LLM never touches it.
 import { db, getMachine, getOperator, kvGet, kvSet, type Task } from "./db";
-import { ANOMALY, SAFETY, SCORE, type Mode } from "./config";
+import { ANOMALY, SAFETY, SCORE, modeWithHysteresis, type Bands, type Mode } from "./config";
 import { computeScore, idleBaseline, rollingIdleRatio, type ScoreBreakdown } from "./stats";
 import { predictMinutes, type EtaResult } from "./eta";
+import { contributionLabel, fetchModelScore } from "./profModel";
 
 export type AlertType = "SEATBELT" | "PROXIMITY" | "DROWSINESS" | "IDLE";
 export type Alert = {
@@ -49,6 +50,11 @@ export type SimState = {
   eta: (EtaResult & { taskId: number; key: string; at: number }) | null;
   etaPending: string | null;
   score: ScoreBreakdown | null;
+  scoreSeq: number; // latest ML score request; older responses are ignored
+  lastRescoreMs: number; // periodic re-score (picks up a recovered ML service and slow-moving features)
+  briefingTaskId: number | null; // task held while its spoken briefing plays: no cycles, no timer, no idle
+  briefingUntil: number; // safety net: auto-release if the browser never reports the briefing finished
+  modelReady: Promise<void> | null; // first ML score of the session (awaited by POST /api/session)
   events: { ts: number; kind: string; text: string }[];
 };
 
@@ -89,6 +95,11 @@ function fresh(operatorId: string): SimState {
     eta: null,
     etaPending: null,
     score: null,
+    scoreSeq: 0,
+    lastRescoreMs: now,
+    briefingTaskId: null,
+    briefingUntil: 0,
+    modelReady: null,
     events: [],
   };
 }
@@ -102,7 +113,8 @@ export function startSession(operatorId: string): SimState {
   else kvSet("shift", { op: operatorId, start: s.shiftStart });
   g.__argusSim = s;
   s.score = computeScore(operatorId, s.shiftStart);
-  pushEvent(s, "session", `Session started — ${s.score.mode} mode (score ${s.score.score})`);
+  pushEvent(s, "session", `Session started — ${getOperator(operatorId)!.name}`);
+  s.modelReady = refreshModelScore(s, s.score, true);
   return s;
 }
 
@@ -148,8 +160,10 @@ export function tick(): SimState {
   const machine = getMachine(s.machineId)!;
   const op = getOperator(s.operatorId)!;
   const task = currentTask(s.operatorId);
-  const cycling = s.engineOn && !!task && s.working;
-  const idle = s.engineOn && !cycling;
+  if (s.briefingTaskId != null && now > s.briefingUntil) releaseBriefing(s.briefingTaskId);
+  const briefing = s.briefingTaskId != null; // operator is listening to the task briefing, not working or idling
+  const cycling = s.engineOn && !!task && s.working && !briefing;
+  const idle = s.engineOn && !cycling && !briefing;
 
   if (s.engineOn) {
     s.engineSec += dt;
@@ -189,6 +203,10 @@ export function tick(): SimState {
   );
 
   refreshEta(s);
+  if (now - s.lastRescoreMs > 30000) {
+    s.lastRescoreMs = now;
+    recomputeScore(s);
+  }
   return s;
 }
 
@@ -355,10 +373,55 @@ function evaluateBehavior(s: SimState, dt: number) {
   if (rescore) recomputeScore(s);
 }
 
+/** Recompute after an event. The rule-based formula is always computed (it is the fallback); the ML model
+ *  (cv-service /score) then replaces it asynchronously when the service answers. */
 export function recomputeScore(s: SimState) {
+  const formula = computeScore(s.operatorId, s.shiftStart, s.score?.mode ?? null);
+  if (!s.score || s.score.source === "formula") applyScore(s, formula);
+  void refreshModelScore(s, formula);
+}
+
+function applyScore(s: SimState, next: ScoreBreakdown, announce = false) {
   const prev = s.score?.mode;
-  s.score = computeScore(s.operatorId, s.shiftStart, prev ?? null);
-  if (prev && prev !== s.score.mode) pushEvent(s, "mode", `Assistance mode → ${s.score.mode} (score ${s.score.score})`);
+  s.score = next;
+  db().prepare("UPDATE operators SET assistance_score=?, mode=? WHERE id=?").run(next.score, next.mode, s.operatorId);
+  // Score history for the end-of-shift report (only when it actually changes)
+  const last = db().prepare("SELECT score, mode, source FROM score_log WHERE operator_id=? ORDER BY id DESC LIMIT 1").get(s.operatorId) as
+    | { score: number; mode: string; source: string }
+    | undefined;
+  if (!last || last.score !== next.score || last.mode !== next.mode || last.source !== next.source)
+    db().prepare("INSERT INTO score_log (operator_id,timestamp,score,mode,source) VALUES (?,?,?,?,?)").run(
+      s.operatorId, new Date().toISOString(), next.score, next.mode, next.source,
+    );
+  const by = next.source === "model" ? `ML model ${next.model?.version}` : "rule-based formula";
+  if (announce || (prev && prev !== next.mode)) pushEvent(s, "mode", `Assistance mode → ${next.mode} (score ${next.score}, ${by})`);
+}
+
+// Default model bands if the service doesn't send them (values from the current prof-v1 training run)
+const MODEL_BANDS_DEFAULT: Bands = { coaching: 47.8, assist: 70.0, silent_guardian: 82.1 };
+
+export async function refreshModelScore(s: SimState, formula: ScoreBreakdown, announce = false) {
+  const seq = ++s.scoreSeq;
+  const r = await fetchModelScore({ operatorId: s.operatorId, machineId: s.machineId, shiftStart: s.shiftStart, weather: s.weather });
+  if (seq !== s.scoreSeq || g.__argusSim !== s) return; // superseded by a newer request or another session
+  if (!r) {
+    if (s.score?.source !== "formula" || announce) applyScore(s, formula, announce); // service down: formula fallback
+    return;
+  }
+  const bands = r.result.bands ?? MODEL_BANDS_DEFAULT;
+  applyScore(
+    s,
+    {
+      score: r.result.score,
+      mode: modeWithHysteresis(r.result.score, s.score?.source === "model" ? s.score.mode : null, bands),
+      factors: formula.factors,
+      terms: r.result.contributions.slice(0, 8).map((c) => ({ label: contributionLabel(c.feature, r.features), delta: c.delta })),
+      source: "model",
+      bands,
+      model: { version: r.result.model_version, incident_risk: r.result.incident_risk, formula_score: formula.score, formula_mode: formula.mode },
+    },
+    announce,
+  );
 }
 
 // ---------------- ETA (non-blocking; re-predicts when conditions change) ----------------
@@ -414,11 +477,30 @@ export function startTask(taskId: number) {
   const s = sim();
   const d = db();
   d.prepare("UPDATE tasks SET status='scheduled' WHERE operator_id=? AND status='in_progress'").run(s.operatorId);
-  d.prepare("UPDATE tasks SET status='in_progress', started_at=COALESCE(started_at, ?) WHERE id=?").run(new Date().toISOString(), taskId);
+  // started_at is set when the briefing ends (releaseBriefing), so the briefing doesn't count as task time
+  d.prepare("UPDATE tasks SET status='in_progress' WHERE id=?").run(taskId);
+  s.briefingTaskId = taskId;
+  s.briefingUntil = Date.now() + 20000; // extended once the briefing text (and its length) is known
   s.engineOn = true;
   s.working = true;
   s.eta = null;
   pushEvent(s, "task", `Task started #${taskId}`);
+}
+
+/** Keep the task on hold until the spoken briefing ends (the browser reports it; this is the upper limit). */
+export function holdForBriefing(taskId: number, ms: number) {
+  const s = sim();
+  if (s.briefingTaskId === taskId) s.briefingUntil = Date.now() + ms;
+}
+
+/** Briefing finished (or was skipped/interrupted): start the task's cycles and timer. */
+export function releaseBriefing(taskId: number) {
+  const s = sim();
+  if (s.briefingTaskId !== taskId) return;
+  s.briefingTaskId = null;
+  db().prepare("UPDATE tasks SET started_at=COALESCE(started_at, ?) WHERE id=?").run(new Date().toISOString(), taskId);
+  s.lastTickMs = Date.now(); // don't credit the briefing time to the first work tick
+  pushEvent(s, "task", `Briefing finished — task #${taskId} timer started`);
 }
 
 export function completeTask(taskId: number) {

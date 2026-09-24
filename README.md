@@ -9,7 +9,7 @@ argus/
 │  ├─ src/lib/          engine.ts (rules), stats.ts (score/anomaly), agent.ts + tools.ts (LLM), db.ts (SQLite)
 │  ├─ data/             SOP manuals (knowledge base) + training-modules.json
 │  └─ public/training/  put featured.mp4 here (git-ignored)
-├─ cv-service/          FastAPI: MediaPipe drowsiness, OpenCV HOG people detection, RandomForest ETA
+├─ cv-service/          FastAPI: MediaPipe drowsiness, OpenCV HOG people detection, RandomForest ETA, ML proficiency score
 └─ start-argus.ps1      launches both services
 ```
 Not in git (created locally): `web/.env.local`, `web/argus.db`, `cv-service/.venv`, `cv-service/eta_model.pkl`, `cv-service/face_landmarker.task`, training video.
@@ -66,7 +66,7 @@ Without an API key, the assistant runs in **offline mode**: it calls the same re
 Or run `start-argus.ps1` from the repo root to launch both.
 
 ## Demo script (about 3 minutes)
-1. **Operator switcher:** Ravi (Silent Guardian 100), Maya (Assist about 78), Sam (Coaching 51). The mode badge shows the score, and the score card shows the exact formula terms.
+1. **Operator switcher:** Ravi (Silent Guardian 84), Maya (Assist 74), Sam (Coaching 59), scored by the ML model. The mode badge shows the score, and the score card shows the model's top factors, the incident risk and the formula fallback score.
 2. **Start a task:** the engine turns on, load cycles count up, and the RandomForest ETA appears. Change the weather to `heavy_rain` and the ETA re-predicts live (logged in the Intelligence loop feed).
 3. **Seatbelt:** click *Seatbelt → UNFASTENED*. You get a red banner and a spoken alert that interrupts any other speech. The incident is auto-logged, the score drops, and the mode may change (announced by voice).
 4. **Drowsiness:** turn on the driver camera and close your eyes for about 2 s. EAR drops below the adaptive threshold and triggers a DROWSINESS alert.
@@ -74,11 +74,15 @@ Or run `start-argus.ps1` from the repo root to launch both.
 6. **Idle cost:** click *Operator waiting*. After 20 s a live $/h fuel-burn nudge is spoken. Keep idling and the idle z-score crosses 2σ vs. this operator's baseline, which logs an IDLE_ANOMALY flag and lowers the score.
 7. **Ask Argus:** "Am I safe to continue?" or "How long until this task is done?" Switch to Sam and ask again: same tools, very different tone and length.
 8. **Training Hub:** recommendations are ranked from the incidents you just caused. The featured video slot is at the top. Take the quiz, then mark the module complete.
+9. **End-of-shift report:** click *Shift report* on the tasks card. You get the shift's numbers and a supervisor summary written by Gemini from the shift data, plus a short spoken summary for the operator. *Download PDF* gives a 3-page report with charts (proficiency over the shift, idle share and load cycles, fuel, time split, incidents, training), rendered by the CV/ML service (`cv-service/report_pdf.py`).
 
 ## Adding your training video
 Drop an MP4 at **`web/public/training/featured.mp4`** and reload the Training Hub.
 To use a different filename or title, edit the `TM-VIDEO` entry in `web/data/training-modules.json`.
 Before the file is in place, the slot has a "Preview a local video file" button.
+
+## Proficiency score (ML)
+The assistance mode is driven by an ML model (`cv-service/train_proficiency.py`, HistGradientBoosting with monotonic constraints and calibration, trained on a simulated fleet of 200 operators). It predicts the risk of a safety incident in the next 5 shifts, and the score is 100 x (1 - risk). The web app calls `POST :8001/score` after every event and falls back to the rule-based formula if the service is down. Results and assumptions: `cv-service/PROFICIENCY_MODEL.md`. Retrain with `python train_proficiency.py`, evaluate with `python eval_proficiency.py`.
 
 ## Safety design
 - `engine.ts` is the **only** writer of alerts and incidents. The inputs are the simulated sensors and CV results, which are ingested server-side from the Python service, not claimed by the client.

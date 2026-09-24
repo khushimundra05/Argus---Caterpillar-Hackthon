@@ -20,7 +20,8 @@ class VoiceManager {
   mode: Mode = "Assist";
   private current: SpeechSynthesisUtterance | null = null;
   private currentIsAlert = false;
-  private queue: string[] = [];
+  private queue: { text: string; onDone?: () => void }[] = [];
+  private currentDone: (() => void) | null = null;
   private held = false;
   private voice: SpeechSynthesisVoice | null = null;
   private primary = false;
@@ -101,25 +102,62 @@ class VoiceManager {
     return text;
   }
 
-  speak(text: string, priority: Priority = "normal") {
+  /** Split into sentence-sized pieces: Chrome's online voices can stop mid-way through a long utterance
+   *  without firing onend, which would stall the queue (and anything waiting for the speech to finish). */
+  private chunks(text: string) {
+    const out: string[] = [];
+    for (const sentence of text.trim().split(/(?<=[.!?])\s+(?=[A-Z"'])/)) {
+      const last = out.length - 1;
+      if (last >= 0 && out[last].length + sentence.length < 200) out[last] += ` ${sentence}`;
+      else out.push(sentence);
+    }
+    return out;
+  }
+
+  /** Drop queued speech, telling anyone waiting on it that it's over. */
+  private flush() {
+    const q = this.queue;
+    this.queue = [];
+    q.forEach((item) => item.onDone?.());
+  }
+
+  /** Mark the current utterance finished (spoken or cancelled) and notify its waiter once. */
+  private endCurrent() {
+    const cb = this.currentDone;
+    this.current = null;
+    this.currentDone = null;
+    cb?.();
+  }
+
+  /** `onDone` fires once when this speech has finished, or immediately if it is skipped or interrupted. */
+  speak(text: string, priority: Priority = "normal", onDone?: () => void) {
     const synth = this.synth;
-    if (!synth || !this.enabled || !text || !this.isSpeaker()) return;
+    if (!synth || !this.enabled || !text || !this.isSpeaker()) {
+      onDone?.();
+      return;
+    }
     this.pickVoice();
     if (priority === "alert") {
       // Interrupt anything that isn't an alert; drop the stale normal queue
-      this.queue = [];
-      this.current = null;
+      this.flush();
+      this.endCurrent();
       synth.cancel();
       this.utter(text, true);
       return;
     }
-    if (this.held) return; // operator is talking; don't let the mic hear us
-    const shaped = priority === "normal" ? this.shape(text) : text;
-    if (this.current || synth.speaking || synth.pending) this.queue.push(shaped);
-    else this.utter(shaped, false);
+    if (this.held) {
+      onDone?.(); // operator is talking; don't let the mic hear us
+      return;
+    }
+    const parts = this.chunks(priority === "normal" ? this.shape(text) : text);
+    parts.forEach((part, i) => this.queue.push({ text: part, onDone: i === parts.length - 1 ? onDone : undefined }));
+    if (!(this.current || synth.speaking || synth.pending)) {
+      const next = this.queue.shift()!;
+      this.utter(next.text, false, next.onDone);
+    }
   }
 
-  private utter(text: string, isAlert: boolean) {
+  private utter(text: string, isAlert: boolean, onDone?: () => void) {
     const synth = this.synth!;
     const u = new SpeechSynthesisUtterance(text);
     if (this.voice) u.voice = this.voice;
@@ -128,11 +166,12 @@ class VoiceManager {
     u.volume = 1;
     this.current = u;
     this.currentIsAlert = isAlert;
+    this.currentDone = onDone ?? null;
     const done = () => {
       if (this.current !== u) return; // a cancelled/replaced utterance finishing late must not advance the queue
-      this.current = null;
+      this.endCurrent();
       const next = this.queue.shift();
-      if (next) this.utter(next, false);
+      if (next) this.utter(next.text, false, next.onDone);
     };
     u.onend = done;
     u.onerror = done;
@@ -143,16 +182,16 @@ class VoiceManager {
   hold(on: boolean) {
     this.held = on;
     if (!on) return;
-    this.queue = [];
+    this.flush();
     if (this.current && !this.currentIsAlert) {
-      this.current = null;
+      this.endCurrent();
       this.synth?.cancel();
     }
   }
 
   stop() {
-    this.queue = [];
-    this.current = null;
+    this.flush();
+    this.endCurrent();
     this.synth?.cancel();
   }
 }

@@ -1,7 +1,7 @@
 // Statistical layer: adaptive-assistance score + idle anomaly baseline.
 // Pure rules / statistics — no ML, no LLM.
 import { db, getOperator } from "./db";
-import { SCORE, modeWithHysteresis, type Mode } from "./config";
+import { FORMULA_BANDS, SCORE, modeWithHysteresis, type Bands, type Mode } from "./config";
 import { MODULES } from "./training";
 
 const weekAgo = () => new Date(Date.now() - 7 * 864e5).toISOString();
@@ -18,6 +18,10 @@ export type ScoreBreakdown = {
     positive_credit_shift: number;
   };
   terms: { label: string; delta: number }[];
+  source: "formula" | "model";
+  bands: Bands;
+  /** Present when the ML model (cv-service /score) produced this score. */
+  model?: { version: string; incident_risk: number; formula_score: number; formula_mode: Mode };
 };
 
 /**
@@ -125,6 +129,8 @@ export function computeScore(operatorId: string, shiftStart: string, prevMode: M
       positive_credit_shift: positive,
     },
     terms: terms.map((t) => ({ ...t, delta: Math.round(t.delta * 10) / 10 })),
+    source: "formula",
+    bands: FORMULA_BANDS,
   };
 }
 

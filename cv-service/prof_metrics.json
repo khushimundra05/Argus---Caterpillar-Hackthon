@@ -1,0 +1,44 @@
+{
+  "test_operators": 40,
+  "test_rows": 2400,
+  "incident_rate_test": 0.354,
+  "brier_always_predict_base_rate": 0.2312,
+  "model_prof_v1": {
+    "auc": 0.6766,
+    "brier": 0.2095
+  },
+  "current_formula_as_risk": {
+    "auc": 0.6579,
+    "brier": 0.2556
+  },
+  "current_formula_recalibrated": {
+    "auc": 0.6579,
+    "brier": 0.2163
+  },
+  "ceiling_true_skill_auc": 0.6857,
+  "auc_gain_vs_formula_95ci_operator_bootstrap": [
+    -0.011712205233131759,
+    0.05218818476255273
+  ],
+  "cv_auc_train_operators": 0.6908,
+  "chosen_params": {
+    "max_depth": 3,
+    "max_iter": 200
+  },
+  "calibration_platt_slope_intercept": [
+    0.79,
+    -0.164
+  ],
+  "mode_bands_lower_bounds": {
+    "coaching": 47.8,
+    "assist": 70.0,
+    "silent_guardian": 82.1
+  },
+  "mode_share_test": {
+    "Instructor": 0.122,
+    "Coaching": 0.414,
+    "Assist": 0.324,
+    "Silent Guardian": 0.14
+  },
+  "monotonic_violations": "0 of 88200 checked steps"
+}

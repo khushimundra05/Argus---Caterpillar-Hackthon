@@ -3,6 +3,8 @@
   POST /analyze/driver  {image: dataURL|base64}  -> drowsiness via MediaPipe FaceMesh Eye Aspect Ratio
   POST /analyze/zone    {image}                  -> people in hazard zone via OpenCV HOG pedestrian detector
   POST /predict         {task features}          -> RandomForest task-time estimate (minutes)
+  POST /score           {features}               -> ML proficiency score (prof-v1)
+  POST /report/pdf      {shift report JSON}      -> end-of-shift PDF with charts
   GET  /health
 
 Run:  uvicorn main:app --port 8001
@@ -13,15 +15,19 @@ import base64
 import time
 from collections import deque
 from pathlib import Path
+from typing import Optional
 
 import cv2
 import joblib
 import numpy as np
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+import report_pdf
+import score_model
 import train_eta
+import train_proficiency
 
 HERE = Path(__file__).parent
 
@@ -131,10 +137,17 @@ app = FastAPI(title="Argus CV/ML service")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 eta_model = joblib.load(train_eta.MODEL_PATH) if train_eta.MODEL_PATH.exists() else train_eta.train()
+# Proficiency scorer: trained on a simulated fleet (see train_proficiency.py); the web app falls back to computeScore() if /score fails.
+prof_model = score_model.load() if score_model.MODEL_PATH.exists() else train_proficiency.train(verbose=False)
 
 
 class ImageIn(BaseModel):
     image: str
+
+
+class ScoreIn(BaseModel):
+    operator_id: Optional[str] = None
+    features: dict[str, Optional[float]]  # null / missing features are handled by the model
 
 
 class EtaIn(BaseModel):
@@ -150,7 +163,7 @@ class EtaIn(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "face_backend": FACE_BACKEND, "person_detector": "opencv_hog", "eta_model": "random_forest"}
+    return {"ok": True, "face_backend": FACE_BACKEND, "person_detector": "opencv_hog", "eta_model": "random_forest", "score_model": score_model.VERSION}
 
 
 @app.post("/analyze/driver")
@@ -249,3 +262,14 @@ def predict(body: EtaIn):
     row = body.model_dump()
     minutes = float(eta_model.predict([train_eta.encode(row)])[0])
     return {"minutes": round(minutes, 1)}
+
+
+@app.post("/score")
+def score(body: ScoreIn):
+    return score_model.score(prof_model, body.features)
+
+
+@app.post("/report/pdf")
+def report_pdf_endpoint(report: dict):
+    """End-of-shift report (JSON built by the web app) -> 3-page PDF with charts."""
+    return Response(content=report_pdf.build_pdf(report), media_type="application/pdf")

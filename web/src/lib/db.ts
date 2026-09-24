@@ -68,6 +68,11 @@ function migrate(d: Database.Database) {
   CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   CREATE INDEX IF NOT EXISTS idx_tel_machine ON telemetry(machine_id, id);
   CREATE INDEX IF NOT EXISTS idx_inc_op ON incidents(operator_id, timestamp);
+  CREATE TABLE IF NOT EXISTS score_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, operator_id TEXT NOT NULL, timestamp TEXT NOT NULL,
+    score REAL NOT NULL, mode TEXT NOT NULL, source TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_score_op ON score_log(operator_id, timestamp);
   `);
   // resolved_at lets the score credit fast corrections (added to existing DBs without a reset)
   const cols = d.prepare("PRAGMA table_info(incidents)").all() as { name: string }[];
@@ -112,11 +117,13 @@ function seed(d: Database.Database) {
 
     // Past incidents / anomalies (last 7 days) so each operator lands in a different mode
     const inc = d.prepare(
-      "INSERT INTO incidents (operator_id,machine_id,type,severity,timestamp,telemetry_snapshot,resolved,source) VALUES (?,?,?,?,?,?,1,'history')",
+      "INSERT INTO incidents (operator_id,machine_id,type,severity,timestamp,telemetry_snapshot,resolved,source,resolved_at) VALUES (?,?,?,?,?,?,1,'history',?)",
     );
-    inc.run("OP-102", "M-950", "SEATBELT", "critical", daysAgo(3), "{}");
-    inc.run("OP-103", "M-D6", "PROXIMITY", "critical", daysAgo(2), "{}");
-    inc.run("OP-103", "M-D6", "SEATBELT", "critical", daysAgo(5), "{}");
+    const after = (iso: string, sec: number) => new Date(Date.parse(iso) + sec * 1000).toISOString();
+    inc.run("OP-102", "M-950", "SEATBELT", "critical", daysAgo(3), "{}", null);
+    // Sam corrected slowly (feeds the ML model's seconds-to-correct features; the formula already counts these as slow)
+    inc.run("OP-103", "M-D6", "PROXIMITY", "critical", daysAgo(2), "{}", after(daysAgo(2), 14));
+    inc.run("OP-103", "M-D6", "SEATBELT", "critical", daysAgo(5), "{}", after(daysAgo(5), 13));
 
     const bl = d.prepare("INSERT INTO behavior_logs (operator_id,timestamp,event_type,detail) VALUES (?,?,?,?)");
     bl.run("OP-102", daysAgo(2), "IDLE_ANOMALY", JSON.stringify({ z: 2.4, idle_ratio: 0.26 }));
@@ -131,7 +138,7 @@ function seed(d: Database.Database) {
     );
     t.run("OP-101", "M-320", "Footing excavation", "trenching", 40, daysAgo(2, 8), 50, 49, daysAgo(2, 9));
     t.run("OP-102", "M-950", "Truck loading Pit 1", "truck_loading", 40, daysAgo(2, 8), 45, 46, daysAgo(2, 9));
-    t.run("OP-103", "M-D6", "Pad grading", "grading", 30, daysAgo(2, 8), 40, 42, daysAgo(2, 9));
+    t.run("OP-103", "M-D6", "Pad grading", "grading", 30, daysAgo(2, 8), 40, 45, daysAgo(2, 9));
 
     // Today's schedule
     const today: [string, string, string, string, number, number, number][] = [

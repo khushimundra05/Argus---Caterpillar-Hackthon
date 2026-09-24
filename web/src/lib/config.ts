@@ -43,22 +43,27 @@ export const SCORE = {
 
 export type Mode = "Instructor" | "Coaching" | "Assist" | "Silent Guardian";
 
-export function modeForScore(score: number): Mode {
-  if (score < 40) return "Instructor";
-  if (score <= 65) return "Coaching";
-  if (score <= 85) return "Assist";
+/** Lower bound of each mode's score band. The formula uses 40/66/86; the ML model ships its own
+ *  (re-tuned to its compressed 100*(1-p) scale, see cv-service/train_proficiency.py). */
+export type Bands = { coaching: number; assist: number; silent_guardian: number };
+export const FORMULA_BANDS: Bands = { coaching: 40, assist: 66, silent_guardian: 86 };
+
+export function modeForScore(score: number, bands: Bands = FORMULA_BANDS): Mode {
+  if (score < bands.coaching) return "Instructor";
+  if (score < bands.assist) return "Coaching";
+  if (score < bands.silent_guardian) return "Assist";
   return "Silent Guardian";
 }
 
 const MODE_ORDER: Mode[] = ["Instructor", "Coaching", "Assist", "Silent Guardian"];
-const BAND_LOW: Record<Mode, number> = { Instructor: 0, Coaching: 40, Assist: 66, "Silent Guardian": 86 };
+const bandLow = (m: Mode, b: Bands) => ({ Instructor: 0, Coaching: b.coaching, Assist: b.assist, "Silent Guardian": b.silent_guardian })[m];
 
 /** Like modeForScore, but only leaves the previous mode once the score is `hysteresis` points past the boundary. */
-export function modeWithHysteresis(score: number, prev: Mode | null): Mode {
-  const raw = modeForScore(score);
+export function modeWithHysteresis(score: number, prev: Mode | null, bands: Bands = FORMULA_BANDS): Mode {
+  const raw = modeForScore(score, bands);
   if (!prev || raw === prev) return raw;
   const up = MODE_ORDER.indexOf(raw) > MODE_ORDER.indexOf(prev);
-  const boundary = up ? BAND_LOW[MODE_ORDER[MODE_ORDER.indexOf(prev) + 1]] : BAND_LOW[prev];
-  const clear = up ? score >= boundary + SCORE.hysteresis : score <= boundary - 1 - SCORE.hysteresis;
+  const boundary = up ? bandLow(MODE_ORDER[MODE_ORDER.indexOf(prev) + 1], bands) : bandLow(prev, bands);
+  const clear = up ? score >= boundary + SCORE.hysteresis : score < boundary - SCORE.hysteresis;
   return clear ? raw : prev;
 }
