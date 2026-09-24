@@ -94,7 +94,8 @@ class VoiceManager {
 
   /** Mode-dependent trimming for normal (non-alert) speech. */
   private shape(text: string) {
-    const sentences = text.match(/[^.!?]+[.!?]*/g) ?? [text];
+    // Break only where punctuation is followed by a new capitalised sentence, so "7 a.m., then" or "2.5 m" stay whole
+    const sentences = text.trim().split(/(?<=[.!?])\s+(?=[A-Z"'])/);
     if (this.mode === "Silent Guardian") return sentences.slice(0, 1).join(" ");
     if (this.mode === "Assist") return sentences.slice(0, 2).join(" ");
     return text;
